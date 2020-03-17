@@ -7,15 +7,16 @@ import json
 import voluptuous as vol
 import os
 import websocket
-import wakeonlan
 import time
 import requests
 import subprocess
 
 from .PySmartCrypto.pysmartcrypto import PySmartCrypto
 
+from bs4 import BeautifulSoup
+
 from homeassistant import util
-from homeassistant.components.media_player import MediaPlayerDevice, PLATFORM_SCHEMA
+from homeassistant.components.media_player import MediaPlayerDevice, PLATFORM_SCHEMA, DEVICE_CLASS_TV
 from homeassistant.components.media_player.const import (
     MEDIA_TYPE_CHANNEL,
     SUPPORT_NEXT_TRACK,
@@ -67,6 +68,7 @@ SUPPORT_SAMSUNGTV = (
     SUPPORT_PAUSE
     | SUPPORT_VOLUME_STEP
     | SUPPORT_VOLUME_MUTE
+    | SUPPORT_VOLUME_SET
     | SUPPORT_PREVIOUS_TRACK
     | SUPPORT_SELECT_SOURCE
     | SUPPORT_NEXT_TRACK
@@ -158,9 +160,9 @@ class SamsungTVDevice(MediaPlayerDevice):
         self._name = name
         self._mac = mac
         self._uuid = uuid
-        self._wol = wakeonlan
         # Assume that the TV is not muted
         self._muted = False
+        self._volume = 0
         # Assume that the TV is in Play mode
         self._playing = True
         self._state = None
@@ -182,6 +184,10 @@ class SamsungTVDevice(MediaPlayerDevice):
     def update(self):
         """Update state of device."""
         self.send_key("KEY")
+        currentvolume = self.SendSOAP('smp_17_', 'urn:schemas-upnp-org:service:RenderingControl:1', 'GetVolume',
+                                      '<InstanceID>0</InstanceID><Channel>Master</Channel>', 'currentvolume')
+        if currentvolume:
+            self._volume = int(currentvolume) / 100
 
     def pingTV(self):
         """ping TV"""
@@ -192,7 +198,7 @@ class SamsungTVDevice(MediaPlayerDevice):
             return True
         else:
             return False
-        
+
     def get_remote(self):
         """Create or return a remote control instance."""
         if self._remote is None:
@@ -206,14 +212,12 @@ class SamsungTVDevice(MediaPlayerDevice):
         if self._power_off_in_progress() and key not in ("KEY_POWER", "KEY_POWEROFF"):
             _LOGGER.info("TV is powering off, not sending command: %s", key)
             return
-        
         # first try pinging the TV
         if not self.pingTV():
             self._state = STATE_OFF
             #self.get_remote().close()
             self._remote = None
             return
-        
         try:
             # recreate connection if connection was dead
             retry_count = 1
@@ -242,19 +246,9 @@ class SamsungTVDevice(MediaPlayerDevice):
         )
 
     @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the device."""
-        return self._uuid
-
-    @property
-    def name(self):
-        """Return the name of the device."""
-        return self._name
-
-    @property
-    def state(self):
-        """Return the state of the device."""
-        return self._state
+    def device_class(self):
+        """Set the device class to TV."""
+        return DEVICE_CLASS_TV
 
     @property
     def is_volume_muted(self):
@@ -262,16 +256,34 @@ class SamsungTVDevice(MediaPlayerDevice):
         return self._muted
 
     @property
+    def name(self):
+        """Return the name of the device."""
+        return self._name
+
+    @property
     def source_list(self):
         """List of available input sources."""
         return list(self._sourcelist)
 
     @property
+    def state(self):
+        """Return the state of the device."""
+        return self._state
+
+    @property
     def supported_features(self):
         """Flag media player features that are supported."""
-        if self._mac:
-            return SUPPORT_SAMSUNGTV | SUPPORT_TURN_ON
-        return SUPPORT_SAMSUNGTV
+        return SUPPORT_SAMSUNGTV | SUPPORT_TURN_ON
+
+    @property
+    def unique_id(self) -> str:
+        """Return the unique ID of the device."""
+        return self._uuid
+
+    @property
+    def volume_level(self):
+        """Volume level of the media player (0..1)."""
+        return self._volume
 
     def volume_up(self):
         """Volume up the media player."""
@@ -310,6 +322,13 @@ class SamsungTVDevice(MediaPlayerDevice):
         """Send the previous track command."""
         self.send_key("KEY_REWIND")
 
+    def set_volume_level(self, volume):
+        """Volume up the media player."""
+        volset = str(round(volume * 100))
+        self.SendSOAP('smp_17_', 'urn:schemas-upnp-org:service:RenderingControl:1', 'SetVolume',
+                      '<InstanceID>0</InstanceID><DesiredVolume>' + volset + '</DesiredVolume><Channel>Master</Channel>',
+                      '')
+
     async def async_play_media(self, media_type, media_id, **kwargs):
         """Support changing a channel."""
 
@@ -333,9 +352,7 @@ class SamsungTVDevice(MediaPlayerDevice):
 
     def turn_off(self):
         """Turn off media player."""
-        self._end_of_power_off = dt_util.utcnow() + timedelta(seconds=15)
-
-        self.send_key("KEY_POWEROFF")
+        self.hass.services.call('hdmi_cec', 'standby')
         # Force closing of remote session to provide instant UI feedback
         try:
             self.get_remote().close()
@@ -345,11 +362,62 @@ class SamsungTVDevice(MediaPlayerDevice):
 
     def turn_on(self):
         """Turn the media player on."""
-        if self._mac:
-            wakeonlan.send_magic_packet(self._mac)
-        else:
-            self.send_key("KEY_POWERON")
+        self.hass.services.call('hdmi_cec', 'power_on')
 
     async def async_select_source(self, source):
         """Select input source."""
         await self.hass.async_add_job(self.send_key, self._sourcelist[source])
+
+    def SendSOAP(self, path, urn, service, body, XMLTag):
+        CRLF = "\r\n"
+        xmlBody = "";
+        xmlBody += '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.' \
+                   'xmlsoap.org/soap/encoding/">'
+        xmlBody += '<s:Body>'
+        xmlBody += '<u:{service} xmlns:u="{urn}">{body}</u:{service}>'
+        xmlBody += '</s:Body>'
+        xmlBody += '</s:Envelope>'
+        xmlBody = xmlBody.format(urn=urn, service=service, body=body)
+
+        soapRequest = "POST /{path} HTTP/1.0%s" % (CRLF)
+        soapRequest += "HOST: {host}:{port}%s" % (CRLF)
+        soapRequest += "CONTENT-TYPE: text/xml;charset=\"utf-8\"%s" % (CRLF)
+        soapRequest += "SOAPACTION: \"{urn}#{service}\"%s" % (CRLF)
+        soapRequest += "%s" % (CRLF)
+        soapRequest += "{xml}%s" % (CRLF)
+        soapRequest = soapRequest.format(host=self._config['host'], port=7676, xml=xmlBody, path=path,
+                                         urn=urn, service=service)
+
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.settimeout(0.5)
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        dataBuffer = ''
+        response_xml = ''
+        _LOGGER.info("Samsung TV sending: %s", soapRequest)
+
+        try:
+            client.connect((self._config['host'], 7676))
+            client.send(bytes(soapRequest, 'utf-8'))
+            while True:
+                dataBuffer = client.recv(4096)
+                if not dataBuffer: break
+                response_xml += str(dataBuffer)
+        except socket.error as e:
+            return
+
+        response_xml = bytes(response_xml, 'utf-8')
+        response_xml = response_xml.decode(encoding="utf-8")
+        response_xml = response_xml.replace("&lt;", "<")
+        response_xml = response_xml.replace("&gt;", ">")
+        response_xml = response_xml.replace("&quot;", "\"")
+        _LOGGER.info("Samsung TV received: %s", response_xml)
+        if XMLTag:
+            soup = BeautifulSoup(str(response_xml), 'html.parser')
+            xmlValues = soup.find_all(XMLTag)
+            xmlValues_names = [xmlValue.string for xmlValue in xmlValues]
+            if len(xmlValues_names) == 1:
+                return xmlValues_names[0]
+            else:
+                return xmlValues_names
+        else:
+            return response_xml[response_xml.find('<s:Envelope'):]
