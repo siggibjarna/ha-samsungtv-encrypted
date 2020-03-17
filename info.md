@@ -75,6 +75,7 @@ Edit it by adding the following lines:
 - **H6200**
 - **H5500AW**
 - **HU7500**
+- **HU8500**
 - **HU8550**
 
 ***References***
