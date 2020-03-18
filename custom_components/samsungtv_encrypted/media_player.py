@@ -402,7 +402,7 @@ class SamsungTVDevice(MediaPlayerDevice):
         client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         dataBuffer = ''
         response_xml = ''
-        _LOGGER.info("Samsung TV sending: %s", soapRequest)
+        _LOGGER.debug("Samsung TV sending: %s", soapRequest)
 
         try:
             client.connect((self._config['host'], 7676))
@@ -419,7 +419,7 @@ class SamsungTVDevice(MediaPlayerDevice):
         response_xml = response_xml.replace("&lt;", "<")
         response_xml = response_xml.replace("&gt;", ">")
         response_xml = response_xml.replace("&quot;", "\"")
-        _LOGGER.info("Samsung TV received: %s", response_xml)
+        _LOGGER.debug("Samsung TV received: %s", response_xml)
         if XMLTag:
             soup = BeautifulSoup(str(response_xml), 'html.parser')
             xmlValues = soup.find_all(XMLTag)
