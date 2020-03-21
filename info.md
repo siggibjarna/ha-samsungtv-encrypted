@@ -8,12 +8,7 @@
 
 This is a custom component to allow control of Encrypted SamsungTV devices in [HomeAssistant](https://home-assistant.io). 
 This should work on H and J 2014/2015 models (according to [PySmartCrypto](https://github.com/eclair4151/SmartCrypto) specs).
-Is a modified version of the built-in [samsungtv](https://www.home-assistant.io/integrations/samsungtv/) with some extra features:
-
-# Additional Features:
-
-* Send keys using a native Home Assistant service (WIP)
-* Customize source list at media player dropdown list (WIP)
+Is a modified version of the built-in [samsungtv](https://www.home-assistant.io/integrations/samsungtv/):
 
 # Installation (There are two methods, with HACS or manual)
 
@@ -69,14 +64,19 @@ Edit it by adding the following lines:
 2. Reboot Home Assistant
 3. Congrats! You're all set!
 
+# Contribution
+
+Feel free to contribute with other working models and to submit fixes and improvements to the code. Enjoy!
+
 # Working Models
 
-- **H6400**
-- **H6200**
 - **H5500AW**
+- **H6200**
+- **H6400**
 - **HU7500**
 - **HU8500**
 - **HU8550**
+- **J6350**
 
 ***References***
 ----------------
