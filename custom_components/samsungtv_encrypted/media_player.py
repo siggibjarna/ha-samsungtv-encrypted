@@ -57,9 +57,9 @@ DEFAULT_PORT = 8080
 DEFAULT_TIMEOUT = 2
 KEY_PRESS_TIMEOUT = 1.2
 KNOWN_DEVICES_KEY = "samsungtv_known_devices"
-SOURCES = {"TV": "KEY_TV", "HDMI": "KEY_HDMI"}
-CONF_SOURCELIST = "sourcelist"
-CONF_APPLIST = "applist"
+#SOURCES = {"TV": "KEY_TV", "HDMI": "KEY_HDMI"}
+#CONF_SOURCELIST = "sourcelist"
+#CONF_APPLIST = "applist"
 CONF_TOKEN = "token"
 CONF_SESSIONID = "sessionid"
 MIN_TIME_BETWEEN_FORCED_SCANS = timedelta(seconds=2)
@@ -85,8 +85,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
         vol.Optional(CONF_MAC): cv.string,
         vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
-        vol.Optional(CONF_SOURCELIST): cv.string,
-        vol.Optional(CONF_APPLIST): cv.string,
+        #vol.Optional(CONF_SOURCELIST): cv.string,
+        #vol.Optional(CONF_APPLIST): cv.string,
         vol.Optional(CONF_TOKEN): cv.string,
         vol.Optional(CONF_SESSIONID): cv.string,
     }
@@ -101,15 +101,15 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
 
     uuid = None
     
-    if config.get(CONF_SOURCELIST) is not None:
-        sourcelist = json.loads(config.get(CONF_SOURCELIST))
-    else:
-        sourcelist = SOURCES
-
-    if config.get(CONF_APPLIST) is not None:
-        applist = config.get(CONF_APPLIST).split(", ")
-    else:
-        applist = []
+    # if config.get(CONF_SOURCELIST) is not None:
+    #     sourcelist = json.loads(config.get(CONF_SOURCELIST))
+    # else:
+    #     sourcelist = SOURCES
+    # 
+    # if config.get(CONF_APPLIST) is not None:
+    #     applist = config.get(CONF_APPLIST).split(", ")
+    # else:
+    #     applist = []
 
     # Is this a manual configuration?
     if config.get(CONF_HOST) is not None:
@@ -142,7 +142,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     ip_addr = socket.gethostbyname(host)
     if ip_addr not in known_devices:
         #known_devices.add(ip_addr)
-        add_entities([SamsungTVDevice(host, port, name, timeout, mac, uuid, sourcelist, token, sessionid)])
+        add_entities([SamsungTVDevice(host, port, name, timeout, mac, uuid, token, sessionid)])
         _LOGGER.info("Samsung TV %s:%d added as '%s'", host, port, name)
     else:
         _LOGGER.info("Ignoring duplicate Samsung TV %s:%d", host, port)
@@ -150,7 +150,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
 class SamsungTVDevice(MediaPlayerDevice):
     """Representation of a Samsung TV."""
 
-    def __init__(self, host, port, name, timeout, mac, uuid, sourcelist, token, sessionid):
+    def __init__(self, host, port, name, timeout, mac, uuid, token, sessionid):
         """Initialize the Samsung device."""
         # Save a reference to the imported classes
         self._host = host
@@ -181,7 +181,8 @@ class SamsungTVDevice(MediaPlayerDevice):
             "host": host,
             "timeout": timeout,
         }
-        self._sourcelist = sourcelist
+        self._sourcelist = {}
+        self._selected_source = None
 
     def update(self):
         """Update state of device."""
@@ -190,13 +191,18 @@ class SamsungTVDevice(MediaPlayerDevice):
                                       '<InstanceID>0</InstanceID><Channel>Master</Channel>', 'currentvolume')
         if currentvolume:
             self._volume = int(currentvolume) / 100
+            if not bool(self._sourcelist):
+                self._sourcelist = self.getSourceList()
+            else:
+                self._selected_source = self.SendSOAP('smp_4_', 'urn:samsung.com:service:MainTVAgent2:1',
+                                                      'GetCurrentExternalSource', '', 'currentexternalsource')
 
     def pingTV(self):
         """ping TV"""
         cmd = ['ping', '-c1', '-W2', self._host ]
         response = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         stdout, stderr = response.communicate()
-        if response.returncode == 0:   
+        if response.returncode == 0:
             return True
         else:
             return False
@@ -263,9 +269,14 @@ class SamsungTVDevice(MediaPlayerDevice):
         return self._name
 
     @property
+    def source(self):
+        """Return the current input source."""
+        return self._selected_source
+
+    @property
     def source_list(self):
         """List of available input sources."""
-        return list(self._sourcelist)
+        return list(self._sourcelist.keys())
 
     @property
     def state(self):
@@ -326,16 +337,25 @@ class SamsungTVDevice(MediaPlayerDevice):
         """Send the previous track command."""
         self.send_key("KEY_REWIND")
 
+    def select_source(self, source):
+        """Select input source."""
+        if source not in self._sourcelist:
+            _LOGGER.error("Unsupported source: {}".format(source))
+            return
+
+        self.SendSOAP('smp_4_', 'urn:samsung.com:service:MainTVAgent2:1', 'SetMainTVSource',
+                      '<Source>'+source+'</Source><ID>' + self._sourcelist[source] + '</ID><UiID>0</UiID>','')
+
     def set_volume_level(self, volume):
         """Volume up the media player."""
         volset = str(round(volume * 100))
+
         self.SendSOAP('smp_17_', 'urn:schemas-upnp-org:service:RenderingControl:1', 'SetVolume',
                       '<InstanceID>0</InstanceID><DesiredVolume>' + volset + '</DesiredVolume><Channel>Master</Channel>',
                       '')
 
     async def async_play_media(self, media_type, media_id, **kwargs):
         """Support changing a channel."""
-
         if media_type == MEDIA_TYPE_CHANNEL:
         # media_id should only be a channel number
             try:
@@ -343,7 +363,7 @@ class SamsungTVDevice(MediaPlayerDevice):
             except vol.Invalid:
                 _LOGGER.error("Media ID must be positive integer")
                 return
-    
+
             for digit in media_id:
                 await self.hass.async_add_job(self.send_key, "KEY_" + digit)
                 await asyncio.sleep(KEY_PRESS_TIMEOUT, self.hass.loop)
@@ -375,7 +395,8 @@ class SamsungTVDevice(MediaPlayerDevice):
 
     async def async_select_source(self, source):
         """Select input source."""
-        await self.hass.async_add_job(self.send_key, self._sourcelist[source])
+        #await self.hass.async_add_job(self.send_key, self._sourcelist[source])
+        await self.hass.async_add_job(self.select_source, source)
 
     def SendSOAP(self, path, urn, service, body, XMLTag):
         CRLF = "\r\n"
@@ -430,3 +451,23 @@ class SamsungTVDevice(MediaPlayerDevice):
                 return xmlValues_names
         else:
             return response_xml[response_xml.find('<s:Envelope'):]
+
+    def getSourceList(self):
+        sources = {}
+        source_names = self.SendSOAP('smp_4_', 'urn:samsung.com:service:MainTVAgent2:1', 'GetSourceList', '',
+                                     'sourcetype')
+        if source_names:
+            source_ids = self.SendSOAP('smp_4_', 'urn:samsung.com:service:MainTVAgent2:1', 'GetSourceList', '', 'id')
+            if source_ids:
+                sources_connected = self.SendSOAP('smp_4_', 'urn:samsung.com:service:MainTVAgent2:1', 'GetSourceList',
+                                                  '', 'connected')
+                if sources_connected:
+                    del source_ids[0]
+                    j = 0;
+                    for i in range(len(sources_connected)):
+                        if sources_connected[i - j].lower() != 'yes':
+                            del source_names[i - j]
+                            del source_ids[i - j]
+                            j = j + 1
+                    sources = dict(zip(source_names, source_ids))
+        return sources
