@@ -64,6 +64,17 @@ Edit it by adding the following lines:
 2. Reboot Home Assistant
 3. Congrats! You're all set!
 
+# HDMI versions
+
+H & J series TV's cannot be turned on over the network. If you have your Home Assistant server connected to the TV by
+HDMI, and configured so that you can call this service to turn on the TV:
+```buildoutcfg
+service: hdmi_cec.power_on
+```
+So, you can use the HDMI versions and getting full control over your TV.
+
+See [HDMI-CEC integration](https://www.home-assistant.io/integrations/hdmi_cec/)
+
 # Contribution
 
 Feel free to contribute with other working models and to submit fixes and improvements to the code. Enjoy!
