@@ -7,8 +7,9 @@
 # HomeAssistant - SamsungTV Encrypted Component
 
 This is a custom component to allow control of Encrypted SamsungTV devices in [HomeAssistant](https://home-assistant.io). 
-This should work on H and J 2014/2015 models (according to [PySmartCrypto](https://github.com/eclair4151/SmartCrypto) specs).
-Is a modified version of the built-in [samsungtv](https://www.home-assistant.io/integrations/samsungtv/):
+This should work on H and J 2014/2015 models (according to [PySmartCrypto](https://github.com/eclair4151/SmartCrypto)
+specs). Is a modified version of the built-in [samsungtv](https://www.home-assistant.io/integrations/samsungtv/), with
+some extra features.
 
 # Installation (There are two methods, with HACS or manual)
 
@@ -74,6 +75,39 @@ service: hdmi_cec.power_on
 So, you can use the HDMI versions and getting full control over your TV.
 
 See [HDMI-CEC integration](https://www.home-assistant.io/integrations/hdmi_cec/)
+
+# Additional Features
+
+### 1. Send Keys
+
+Send keys using a native Home Assistant service:
+
+```
+service: media_player.play_media
+```
+
+```json
+{
+  "entity_id": "media_player.samsungtv",
+  "media_content_type": "send_key",
+  "media_content_id": "KEY_CODE",
+}
+```
+**Note**: Change "KEY_CODE" by desired key_code.
+
+You can get lots of key codes [here](https://github.com/roberodin/ha-samsungtv-custom#key-codes)
+
+Here you can see a script example:
+```
+tv_channel_down:
+  alias: Channel down
+  sequence:
+  - service: media_player.play_media
+    data:
+      entity_id: media_player.samsung_tv55
+      media_content_type: "send_key"
+      media_content_id: KEY_CHDOWN
+```
 
 # Contribution
 
