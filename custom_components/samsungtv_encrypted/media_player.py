@@ -433,7 +433,8 @@ class SamsungTVDevice(MediaPlayerDevice):
                 data_buffer = client.recv(4096)
                 if not data_buffer: break
                 response_xml += str(data_buffer)
-        except socket.error as e:
+        except socket.error as error:
+            _LOGGER.debug('Error sending upnp soap request. Got {}'.format(error))
             return
 
         response_xml = self.xmlBytesToStr(bytes(response_xml, 'utf-8'))
@@ -467,7 +468,7 @@ class SamsungTVDevice(MediaPlayerDevice):
                 if None not in upnp_paths:
                     for i in range(len(self._urns)):
                         _LOGGER.info('{} uPNP service detected in http://{}{}'
-                              .format(self._urns[i].split(':')[3], entry.location.split('/')[2], upnp_paths[i]))
+                                     .format(self._urns[i].split(':')[3], entry.location.split('/')[2], upnp_paths[i]))
                     return tuple(upnp_ports), tuple(upnp_paths)
         return None, None
 
