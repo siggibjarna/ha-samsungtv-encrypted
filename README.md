@@ -97,7 +97,7 @@ service: media_player.play_media
 
 You can get lots of key codes [here](https://github.com/roberodin/ha-samsungtv-custom#key-codes)
 
-Here you can see a script example:
+Here you can see an example of a Home Assistant script using the media_player.play_media service:
 ```
 tv_channel_down:
   alias: Channel down
