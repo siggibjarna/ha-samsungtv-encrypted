@@ -109,17 +109,16 @@ tv_channel_down:
       media_content_id: KEY_CHDOWN
 ```
 
-
 # Working Models
 
-- **H5500AW**
+- **H5500**
 - **H6200**
 - **H6400**
+- **HU7100**
 - **HU7500**
 - **HU8500**
 - **HU8550**
 - **J6350**
-
 
 # Contribution
 
