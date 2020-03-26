@@ -3,20 +3,14 @@ import asyncio
 from datetime import timedelta
 import logging
 import socket
-import json
 import voluptuous as vol
-import os
-import websocket
-import time
-import requests
 import subprocess
 import urllib.request
 
 from .PySmartCrypto.pysmartcrypto import PySmartCrypto
-
 from bs4 import BeautifulSoup
+from netdisco.ssdp import scan
 
-from homeassistant import util
 from homeassistant.components.media_player import MediaPlayerDevice, PLATFORM_SCHEMA, DEVICE_CLASS_TV
 from homeassistant.components.media_player.const import (
     MEDIA_TYPE_CHANNEL,
@@ -57,9 +51,9 @@ DEFAULT_PORT = 8080
 DEFAULT_TIMEOUT = 2
 KEY_PRESS_TIMEOUT = 1.2
 KNOWN_DEVICES_KEY = "samsungtv_known_devices"
-#SOURCES = {"TV": "KEY_TV", "HDMI": "KEY_HDMI"}
-#CONF_SOURCELIST = "sourcelist"
-#CONF_APPLIST = "applist"
+# SOURCES = {"TV": "KEY_TV", "HDMI": "KEY_HDMI"}
+# CONF_SOURCELIST = "sourcelist"
+# CONF_APPLIST = "applist"
 CONF_TOKEN = "token"
 CONF_SESSIONID = "sessionid"
 MIN_TIME_BETWEEN_FORCED_SCANS = timedelta(seconds=2)
@@ -85,12 +79,13 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
         vol.Optional(CONF_MAC): cv.string,
         vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
-        #vol.Optional(CONF_SOURCELIST): cv.string,
-        #vol.Optional(CONF_APPLIST): cv.string,
+        # vol.Optional(CONF_SOURCELIST): cv.string,
+        # vol.Optional(CONF_APPLIST): cv.string,
         vol.Optional(CONF_TOKEN): cv.string,
         vol.Optional(CONF_SESSIONID): cv.string,
     }
 )
+
 
 def setup_platform(hass, config, add_entities, discovery_info=None):
     """Set up the Samsung TV platform."""
@@ -137,15 +132,15 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
         _LOGGER.warning("Cannot determine device")
         return
 
-    # Only add a device once, so discovered devices do not override manual
-    # config.
+    # Only add a device once, so discovered devices do not override manual config.
     ip_addr = socket.gethostbyname(host)
     if ip_addr not in known_devices:
-        #known_devices.add(ip_addr)
+        # known_devices.add(ip_addr)
         add_entities([SamsungTVDevice(host, port, name, timeout, mac, uuid, token, sessionid)])
         _LOGGER.info("Samsung TV %s:%d added as '%s'", host, port, name)
     else:
         _LOGGER.info("Ignoring duplicate Samsung TV %s:%d", host, port)
+
 
 class SamsungTVDevice(MediaPlayerDevice):
     """Representation of a Samsung TV."""
@@ -183,27 +178,28 @@ class SamsungTVDevice(MediaPlayerDevice):
         self._sourcelist = {}
         self._selected_source = None
         self._urns = ('urn:schemas-upnp-org:service:RenderingControl:1', 'urn:samsung.com:service:MainTVAgent2:1')
-        self._smp = None # a tuple with (smp_rc, smp_mta2)
+        self._upnp_paths = None  # a tuple with upnp paths ('/_smp17_', '/_smp4_')
+        self._upnp_ports = None  # a tuple with upnp ports (7676, 7676)
 
     def update(self):
         """Update state of device."""
         self.send_key("KEY")
-        if not self._smp:
-            self._smp = self.getSmpPorts()
+        if not self._upnp_paths:
+            self._upnp_ports, self._upnp_paths = self.discoverSSDP(timeout=2)
         else:
-            currentvolume = self.SendSOAP(self._smp[0], self._urns[0], 'GetVolume',
+            current_volume = self.SendSOAP(self._upnp_ports[0], self._upnp_paths[0], self._urns[0], 'GetVolume',
                                           '<InstanceID>0</InstanceID><Channel>Master</Channel>', 'currentvolume')
-            if currentvolume:
-                self._volume = int(currentvolume) / 100
+            if current_volume:
+                self._volume = int(current_volume) / 100
                 if not bool(self._sourcelist):
                     self._sourcelist = self.getSourceList()
                 else:
-                    self._selected_source = self.SendSOAP(self._smp[1], self._urns[1],
+                    self._selected_source = self.SendSOAP(self._upnp_ports[1], self._upnp_paths[1], self._urns[1],
                                                           'GetCurrentExternalSource', '', 'currentexternalsource')
 
     def pingTV(self):
         """ping TV"""
-        cmd = ['ping', '-c1', '-W2', self._host ]
+        cmd = ['ping', '-c1', '-W2', self._host]
         response = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         stdout, stderr = response.communicate()
         if response.returncode == 0:
@@ -227,7 +223,7 @@ class SamsungTVDevice(MediaPlayerDevice):
         # first try pinging the TV
         if not self.pingTV():
             self._state = STATE_OFF
-            #self.get_remote().close()
+            # self.get_remote().close()
             self._remote = None
             return
         try:
@@ -246,7 +242,7 @@ class SamsungTVDevice(MediaPlayerDevice):
             # We got a response so it's on.
             self._state = STATE_ON
             self._remote = None
-            LOGGER.debug("Failed sending command %s", key, exc_info=True)
+            _LOGGER.debug("Failed sending command %s", key, exc_info=True)
             return
         if self._power_off_in_progress():
             self._state = STATE_OFF
@@ -345,14 +341,14 @@ class SamsungTVDevice(MediaPlayerDevice):
             _LOGGER.error("Unsupported source: {}".format(source))
             return
 
-        self.SendSOAP(self._smp[1], self._urns[1], 'SetMainTVSource',
+        self.SendSOAP(self._upnp_ports[1], self._upnp_paths[1], self._urns[1], 'SetMainTVSource',
                       '<Source>'+source+'</Source><ID>' + self._sourcelist[source] + '</ID><UiID>0</UiID>','')
 
     def set_volume_level(self, volume):
         """Volume up the media player."""
         volset = str(round(volume * 100))
 
-        self.SendSOAP(self._smp[0], self._urns[0], 'SetVolume',
+        self.SendSOAP(self._upnp_ports[0], self._upnp_paths[0], self._urns[0], 'SetVolume',
                       '<InstanceID>0</InstanceID><DesiredVolume>' + volset + '</DesiredVolume><Channel>Master</Channel>',
                       '')
 
@@ -392,10 +388,10 @@ class SamsungTVDevice(MediaPlayerDevice):
 
     async def async_select_source(self, source):
         """Select input source."""
-        #await self.hass.async_add_job(self.send_key, self._sourcelist[source])
+        # await self.hass.async_add_job(self.send_key, self._sourcelist[source])
         await self.hass.async_add_job(self.select_source, source)
 
-    def SendSOAP(self, path, urn, service, body, XMLTag):
+    def SendSOAP(self, port, path, urn, service, body, XMLTag):
         CRLF = "\r\n"
         xmlBody = "";
         xmlBody += '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.' \
@@ -406,56 +402,91 @@ class SamsungTVDevice(MediaPlayerDevice):
         xmlBody += '</s:Envelope>'
         xmlBody = xmlBody.format(urn=urn, service=service, body=body)
 
-        soapRequest = "POST /{path} HTTP/1.0%s" % (CRLF)
+        soapRequest = "POST {path} HTTP/1.0%s" % (CRLF)
         soapRequest += "HOST: {host}:{port}%s" % (CRLF)
         soapRequest += "CONTENT-TYPE: text/xml;charset=\"utf-8\"%s" % (CRLF)
         soapRequest += "SOAPACTION: \"{urn}#{service}\"%s" % (CRLF)
         soapRequest += "%s" % (CRLF)
         soapRequest += "{xml}%s" % (CRLF)
-        soapRequest = soapRequest.format(host=self._config['host'], port=7676, xml=xmlBody, path=path,
+        soapRequest = soapRequest.format(host=self._config['host'], port=port, xml=xmlBody, path=path,
                                          urn=urn, service=service)
 
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client.settimeout(2)
         client.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        dataBuffer = ''
         response_xml = ''
         _LOGGER.debug("Samsung TV sending: %s", soapRequest)
 
         try:
-            client.connect((self._config['host'], 7676))
+            client.connect((self._config['host'], port))
             client.send(bytes(soapRequest, 'utf-8'))
             while True:
-                dataBuffer = client.recv(4096)
-                if not dataBuffer: break
-                response_xml += str(dataBuffer)
+                data_buffer = client.recv(4096)
+                if not data_buffer: break
+                response_xml += str(data_buffer)
         except socket.error as e:
             return
 
-        response_xml = bytes(response_xml, 'utf-8')
-        response_xml = response_xml.decode(encoding="utf-8")
-        response_xml = response_xml.replace("&lt;", "<")
-        response_xml = response_xml.replace("&gt;", ">")
-        response_xml = response_xml.replace("&quot;", "\"")
+        response_xml = self.xmlBytesToStr(bytes(response_xml, 'utf-8'))
         _LOGGER.debug("Samsung TV received: %s", response_xml)
         if XMLTag:
             soup = BeautifulSoup(str(response_xml), 'lxml')
-            xmlValues = soup.find_all(XMLTag)
-            xmlValues_names = [xmlValue.string for xmlValue in xmlValues]
-            if len(xmlValues_names) == 1:
-                return xmlValues_names[0]
+            xml_values = soup.find_all(XMLTag)
+            xml_values_names = [xmlValue.string for xmlValue in xml_values]
+            if len(xml_values_names) == 1:
+                return xml_values_names[0]
             else:
-                return xmlValues_names
+                return xml_values_names
         else:
             return response_xml[response_xml.find('<s:Envelope'):]
 
+    def xmlBytesToStr(self, xml_bytes):
+        response_xml = xml_bytes.decode(encoding="utf-8")
+        response_xml = response_xml.replace("&lt;", "<")
+        response_xml = response_xml.replace("&gt;", ">")
+        return response_xml.replace("&quot;", "\"")
+
+    def discoverSSDP(self, timeout=5):
+        upnp_ports = [None] * len(self._urns)
+        upnp_paths = [None] * len(self._urns)
+        for entry in scan(timeout):
+            if entry.location.startswith('http://{}'.format(self._config['host'])):
+                for i in range(len(self._urns)):
+                    if entry.st == self._urns[i]:
+                        upnp_ports[i] = int(entry.location.split(':')[2].split('/')[0])
+                        upnp_paths[i] = self.getPathFromUrlSsdp(entry.location, i)
+                if None not in upnp_paths:
+                    for i in range(len(self._urns)):
+                        _LOGGER.info('{} uPNP service detected in http://{}{}'
+                              .format(self._urns[i].split(':')[3], entry.location.split('/')[2], upnp_paths[i]))
+                    return tuple(upnp_ports), tuple(upnp_paths)
+        return None, None
+
+    def getPathFromUrlSsdp(self, url, i, timeout=2):
+        try:
+            file = urllib.request.urlopen(url, timeout=timeout)
+            data = file.read()
+            file.close()
+            response_xml = self.xmlBytesToStr(data)
+            soup = BeautifulSoup(response_xml, 'lxml')
+            services = soup.find_all('service')
+            for service in services:
+                upnp_service = service.find('servicetype').string
+                if upnp_service == self._urns[i]:
+                    return service.find('controlurl').string
+        except (urllib.error.HTTPError, urllib.error.URLError) as error:
+            _LOGGER.debug('Could not access at {}. Got {}'.format(url, error))
+        except socket.timeout:
+            _LOGGER.debug('Timeout accesing at {}'.format(url))
+        return None
+
     def getSourceList(self):
         sources = {}
-        source_names = self.SendSOAP(self._smp[1], self._urns[1], 'GetSourceList', '', 'sourcetype')
+        source_names = self.SendSOAP(self._upnp_ports[1], self._upnp_paths[1], self._urns[1], 'GetSourceList', '', 'sourcetype')
         if source_names:
-            source_ids = self.SendSOAP(self._smp[1], self._urns[1], 'GetSourceList', '', 'id')
+            source_ids = self.SendSOAP(self._upnp_ports[1], self._upnp_paths[1], self._urns[1], 'GetSourceList', '', 'id')
             if source_ids:
-                sources_connected = self.SendSOAP(self._smp[1], self._urns[1], 'GetSourceList', '', 'connected')
+                sources_connected = self.SendSOAP(self._upnp_ports[1], self._upnp_paths[1], self._urns[1], 'GetSourceList', '', 'connected')
                 if sources_connected:
                     del source_ids[0]
                     j = 0;
@@ -466,39 +497,3 @@ class SamsungTVDevice(MediaPlayerDevice):
                             j = j + 1
                     sources = dict(zip(source_names, source_ids))
         return sources
-
-    def getSmpPorts(self):
-        smp_rc = None
-        smp_mta2 = None
-        queue_jump = []
-        for i in range(50):
-            if not queue_jump:
-                try:
-                    file = urllib.request.urlopen('http://{}:7676/smp_{}_'.format(self._config['host'], i + 1),
-                                                  timeout=2)
-                    data = file.read()
-                    file.close()
-                    response_xml = data.decode(encoding="utf-8")
-                    response_xml = response_xml.replace("&lt;", "<")
-                    response_xml = response_xml.replace("&gt;", ">")
-                    response_xml = response_xml.replace("&quot;", "\"")
-                    soup = BeautifulSoup(response_xml, 'lxml')
-                    services = soup.find_all('service')
-                    for service in services:
-                        upnp_service = service.find('servicetype').string
-                        if upnp_service == self._urns[0]:
-                            smp_rc = service.find('controlurl').string[1:]
-                        elif upnp_service == self._urns[1]:
-                            smp_mta2 = service.find('controlurl').string[1:]
-                        queue_jump.extend((True, True, True))
-                    if smp_rc and smp_mta2:
-                        _LOGGER.info("RenderingControl uPNP service detected in: {}".format(smp_rc))
-                        _LOGGER.info("MainTVAgent2 uPNP service detected in: {}".format(smp_mta2))
-                        return smp_rc, smp_mta2
-                except urllib.error.HTTPError:
-                    pass
-                except urllib.error.URLError:
-                    break;
-            else:
-                queue_jump.pop(0)
-        return None
