@@ -186,18 +186,21 @@ class SamsungTVDevice(MediaPlayerDevice):
     def update(self):
         """Update state of device."""
         self.send_key("KEY")
-        if not self._upnp_paths:
-            self._upnp_ports, self._upnp_paths = self.discoverSSDP(timeout=2)
-        else:
-            current_volume = self.SendSOAP(self._upnp_ports[0], self._upnp_paths[0], self._urns[0], 'GetVolume',
-                                          '<InstanceID>0</InstanceID><Channel>Master</Channel>', 'currentvolume')
-            if current_volume:
-                self._volume = int(current_volume) / 100
+        if self._state == STATE_ON:
+            if not self._upnp_paths:
+                self._upnp_ports, self._upnp_paths = self.discoverSSDP(timeout=2)
+            if self._upnp_paths:
+                current_volume = self.SendSOAP(self._upnp_ports[0], self._upnp_paths[0], self._urns[0], 'GetVolume',
+                                              '<InstanceID>0</InstanceID><Channel>Master</Channel>', 'currentvolume')
+                if current_volume:
+                    self._volume = int(current_volume) / 100
                 if not bool(self._sourcelist):
                     self._sourcelist = self.getSourceList()
-                else:
-                    self._selected_source = self.SendSOAP(self._upnp_ports[1], self._upnp_paths[1], self._urns[1],
-                                                          'GetCurrentExternalSource', '', 'currentexternalsource')
+                if bool(self._sourcelist):
+                    selected_source = self.SendSOAP(self._upnp_ports[1], self._upnp_paths[1], self._urns[1],
+                                                    'GetCurrentExternalSource', '', 'currentexternalsource')
+                    if selected_source:
+                        self._selected_source = selected_source
 
     def pingTV(self):
         """ping TV"""
