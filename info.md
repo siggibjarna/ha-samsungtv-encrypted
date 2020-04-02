@@ -42,7 +42,9 @@ After a correct installation, your configuration directory should look like the 
 
 # Configuration
 
-1. Use get_token.py to get your Samsung TV token (use --port 8080). Store CTX <TOKEN> and <SESSION_ID> output. Your TV must be turned on and connected to Internet with the specific IP. Terminal where you have executed get_token.py will ask for a PIN, that will be showed in your TV screen.
+1. Use get_token.py to get your Samsung TV token (use --port 8080). Store TOKEN (CTX) and SESSION_ID output. Your TV must be turned on and connected to Internet with the specific IP. Terminal where you have executed get_token.py will ask for a PIN, that will be showed in your TV screen.
+**Note**: In some models the TOKEN can expire after a time (maybe a week, month), or even the TOKEN can be invalidated due to a loss of TV power. 
+In that case you have to repeat this process again.
 2. Enable the component by editing the configuration.yaml file (within the config directory as well).
 Edit it by adding the following lines:
     ### Example configuration.yaml

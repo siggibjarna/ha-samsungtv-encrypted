@@ -396,8 +396,7 @@ class SamsungTVDevice(MediaPlayerDevice):
 
     def SendSOAP(self, port, path, urn, service, body, XMLTag):
         CRLF = "\r\n"
-        xmlBody = "";
-        xmlBody += '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.' \
+        xmlBody = '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.' \
                    'xmlsoap.org/soap/encoding/">'
         xmlBody += '<s:Body>'
         xmlBody += '<u:{service} xmlns:u="{urn}">{body}</u:{service}>'
@@ -408,11 +407,12 @@ class SamsungTVDevice(MediaPlayerDevice):
         soapRequest = "POST {path} HTTP/1.0%s" % (CRLF)
         soapRequest += "HOST: {host}:{port}%s" % (CRLF)
         soapRequest += "CONTENT-TYPE: text/xml;charset=\"utf-8\"%s" % (CRLF)
+        soapRequest += "CONTENT-LENGTH: {cont_len}%s" % (CRLF)
         soapRequest += "SOAPACTION: \"{urn}#{service}\"%s" % (CRLF)
         soapRequest += "%s" % (CRLF)
         soapRequest += "{xml}%s" % (CRLF)
         soapRequest = soapRequest.format(host=self._config['host'], port=port, xml=xmlBody, path=path,
-                                         urn=urn, service=service)
+                                         urn=urn, service=service, cont_len=len(xmlBody))
 
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client.settimeout(2)
